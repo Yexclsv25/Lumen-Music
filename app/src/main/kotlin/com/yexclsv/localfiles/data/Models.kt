@@ -33,7 +33,9 @@ data class PlaylistRow(
     val isFav: Boolean
 )
 
-enum class LibraryFilter { ALL, FAVORITES, RECENT }
+enum class LibraryFilter { ALL, FAVORITES, RECENT, MOST_PLAYED, HISTORY }
+
+data class PlayStat(val count: Int, val last: Long)
 
 enum class SortMode(val label: String) {
     TITLE("Title"),
@@ -58,7 +60,13 @@ data class Settings(
     val minSeconds: Int = 30,
     val bgIndex: Int = 0,
     val customHue: Float = 265f,
-    val tintPct: Int = 50
+    val tintPct: Int = 50,
+    val autoUpdate: Boolean = true,
+    val skipSilence: Boolean = false,
+    val bassBoost: Int = 0,
+    val loudness: Int = 0,
+    val eqOn: Boolean = false,
+    val eqLevels: String = ""
 )
 
 /** Non-destructive edits stored in the app; the audio file itself is never touched. */

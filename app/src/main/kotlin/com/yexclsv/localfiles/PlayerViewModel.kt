@@ -54,6 +54,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val index = HashMap<String, Track>()
     private var raw: List<Track> = emptyList()
+    private var restored = false
+    private var playJob: Job? = null
+    private var trackedKey: String? = null
     private val artBytes = HashMap<String, ByteArray>()
     private var artRequested: String? = null
     private var controller: MediaController? = null
@@ -61,7 +64,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- derived lists ----------------
     val rows: Flow<List<TrackRow>> =
-        combine(tracks, listState, store.favorites, ui) { t, ls, favs, u -> libraryRows(t, ls, favs, u) }
+        combine(tracks, listState, store.favorites, ui, store.plays) { t, ls, favs, u, plays -> libraryRows(t, ls, favs, u, plays) }
             .flowOn(Dispatchers.Default)
 
     val detailRows: Flow<List<TrackRow>> =
@@ -91,7 +94,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         return TrackRow(t, cur, cur && u.isPlaying, t.key in favs)
     }
 
-    private fun libraryRows(t: List<Track>, ls: ListState, favs: Set<String>, u: PlayerUi): List<TrackRow> {
+    private fun libraryRows(t: List<Track>, ls: ListState, favs: Set<String>, u: PlayerUi, plays: Map<String, PlayStat>): List<TrackRow> {
         var list = t
         if (ls.query.isNotBlank()) {
             val q = ls.query.trim().lowercase()
@@ -103,8 +106,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             LibraryFilter.ALL -> list
             LibraryFilter.FAVORITES -> list.filter { it.key in favs }
             LibraryFilter.RECENT -> list.sortedByDescending { it.dateAdded }.take(100)
+            LibraryFilter.MOST_PLAYED -> list.filter { (plays[it.key]?.count ?: 0) > 0 }
+                .sortedByDescending { plays[it.key]?.count ?: 0 }.take(100)
+            LibraryFilter.HISTORY -> list.filter { plays.containsKey(it.key) }
+                .sortedByDescending { plays[it.key]?.last ?: 0L }.take(100)
         }
-        if (ls.filter != LibraryFilter.RECENT) {
+        if (ls.filter == LibraryFilter.ALL || ls.filter == LibraryFilter.FAVORITES) {
             list = when (ls.sort) {
                 SortMode.TITLE -> list.sortedBy { it.title.lowercase() }
                 SortMode.ARTIST -> list.sortedWith(compareBy({ it.artist.lowercase() }, { it.album.lowercase() }, { it.title.lowercase() }))
@@ -132,7 +139,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 val c = future.get()
                 controller = c
                 c.addListener(object : Player.Listener {
-                    override fun onEvents(player: Player, events: Player.Events) = sync()
+                    override fun onEvents(player: Player, events: Player.Events) {
+                        sync()
+                        if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) saveSession()
+                    }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        if (sleepUntil.value == Long.MAX_VALUE &&
+                            (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+                        ) {
+                            c.pause()
+                            sleepUntil.value = 0L
+                        }
+                    }
 
                     override fun onPlayerError(error: PlaybackException) {
                         val chain = generateSequence<Throwable>(error) { it.cause }
@@ -147,6 +166,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 })
                 sync()
+                tryRestore()
             } catch (_: Exception) {
             }
         }, ContextCompat.getMainExecutor(ctx))
@@ -157,6 +177,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val item = c.currentMediaItem
         val cur = item?.let { index[it.mediaId] ?: fromItem(it) }
         cur?.let { ensureArtwork(it) }
+        if (cur?.key != trackedKey) {
+            trackedKey = cur?.key
+            playJob?.cancel()
+            val k = cur?.key
+            if (k != null) playJob = viewModelScope.launch {
+                delay(20_000)
+                val u = ui.value
+                if (u.current?.key == k && u.isPlaying) store.recordPlay(k)
+            }
+        }
         val state = c.playbackState
         val dur = c.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: cur?.durationMs ?: 0L
         ui.value = PlayerUi(
@@ -259,6 +289,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         tracks.value = list
         pushMetadata()
         sync()
+        tryRestore()
     }
 
     // ---------- rename / cover (stored in the app, files stay untouched) ----------
@@ -416,7 +447,38 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleFavorite(key: String) = store.toggleFavorite(key)
 
+    // ---------------- resume last session ----------------
+    private fun saveSession() {
+        val c = controller ?: return
+        if (c.mediaItemCount == 0) return
+        val cur = c.currentMediaItemIndex
+        val from = maxOf(0, cur - 20)
+        val to = minOf(c.mediaItemCount, from + 300)
+        val keys = (from until to).map { c.getMediaItemAt(it).mediaId }
+        store.saveSession(keys, cur - from, c.currentPosition)
+    }
+
+    private fun tryRestore() {
+        if (restored) return
+        val c = controller ?: return
+        if (raw.isEmpty()) return
+        restored = true
+        if (c.mediaItemCount > 0) return
+        val (keys, idx, pos) = store.loadSession() ?: return
+        val items = keys.mapNotNull { index[it] }.map(::toItem)
+        if (items.isEmpty()) return
+        val startKey = keys.getOrNull(idx)
+        val start = items.indexOfFirst { it.mediaId == startKey }.coerceAtLeast(0)
+        c.setMediaItems(items, start, pos)
+        c.prepare()
+    }
+
     // ---------------- sleep timer ----------------
+    fun setSleepEndOfTrack() {
+        sleepJob?.cancel()
+        sleepUntil.value = Long.MAX_VALUE
+    }
+
     fun setSleep(minutes: Int) {
         sleepJob?.cancel()
         if (minutes <= 0) {
@@ -433,6 +495,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        saveSession()
         controller?.release()
         controller = null
         super.onCleared()

@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.yexclsv.localfiles.alac.AlacRenderersFactory
+import com.yexclsv.localfiles.audio.AudioFx
 import com.yexclsv.localfiles.data.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,7 +97,15 @@ class PlaybackService : MediaSessionService() {
 
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) = refreshButtons()
+            override fun onAudioSessionIdChanged(audioSessionId: Int) = AudioFx.attach(audioSessionId)
         })
+        AudioFx.attach(player.audioSessionId)
+        scope.launch {
+            store.settings.collect {
+                AudioFx.apply(it)
+                player.setSkipSilenceEnabled(it.skipSilence)
+            }
+        }
         scope.launch { store.favorites.collect { refreshButtons() } }
         refreshButtons()
     }
@@ -130,6 +139,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         scope.cancel()
+        AudioFx.release()
         session?.run {
             player.release()
             release()

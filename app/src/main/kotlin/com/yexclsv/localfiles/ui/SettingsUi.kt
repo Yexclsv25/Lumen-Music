@@ -34,6 +34,14 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
         fun addFiles()
         fun clearExtras()
         fun sleepMenu()
+        fun version(): String
+        fun checkUpdates()
+        fun openEqualizer()
+        fun backup()
+        fun restore()
+        fun stats(): Pair<String, String>
+        fun resetStats()
+        fun openRepo()
     }
 
     private val ctx: Context get() = container.context
@@ -79,12 +87,30 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
             ) { v -> cb.update { it.copy(refraction = v) } }
         }
 
+        section("Sound", R.drawable.ic_music_note)
+        card {
+            actionRow(R.drawable.ic_tune, "Equalizer", if (s.eqOn) "On" else "Off") { cb.openEqualizer() }
+            sliderRow(R.drawable.ic_play, "Bass boost", s.bassBoost.toFloat(), 0f, 100f, { "${it.toInt()}%" }) { v ->
+                cb.update { it.copy(bassBoost = v.toInt()) }
+            }
+            sliderRow(R.drawable.ic_next, "Loudness boost", s.loudness.toFloat(), 0f, 100f, { "${it.toInt()}%" }) { v ->
+                cb.update { it.copy(loudness = v.toInt()) }
+            }
+            switchRow(R.drawable.ic_timer, "Skip silence", "Trims silent gaps in songs", s.skipSilence, true) { v ->
+                cb.update { it.copy(skipSilence = v) }
+            }
+        }
+
         section("Playback", R.drawable.ic_play)
         card {
             val until = cb.sleepUntil()
             actionRow(
                 R.drawable.ic_timer, "Sleep timer",
-                if (until > 0) "Pauses at " + DateFormat.getTimeFormat(ctx).format(Date(until)) else "Off"
+                when {
+                    until == Long.MAX_VALUE -> "Pauses when this song ends"
+                    until > 0 -> "Pauses at " + DateFormat.getTimeFormat(ctx).format(Date(until))
+                    else -> "Off"
+                }
             ) { cb.sleepMenu() }
             switchRow(R.drawable.ic_more, "Haptic feedback", "Ticks on taps and scrubbing", s.haptics, true) { v ->
                 cb.update { it.copy(haptics = v) }
@@ -94,6 +120,23 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
                 cb.update { it.copy(minSeconds = v) }
                 cb.rescan()
             }
+        }
+
+        section("Updates", R.drawable.ic_refresh)
+        card {
+            switchRow(R.drawable.ic_refresh, "Check automatically", "Looks for new releases on GitHub", s.autoUpdate, true) { v ->
+                cb.update { it.copy(autoUpdate = v) }
+            }
+            actionRow(R.drawable.ic_info, "Check for updates now", "Installed: v${cb.version()}") { cb.checkUpdates() }
+        }
+
+        section("Your data", R.drawable.ic_heart)
+        card {
+            val (plays, top) = cb.stats()
+            infoRow(R.drawable.ic_music_note, plays, top)
+            actionRow(R.drawable.ic_folder, "Back up", "Favorites, playlists, edits, stats and settings") { cb.backup() }
+            actionRow(R.drawable.ic_refresh, "Restore from backup", "Load a Lumen backup file") { cb.restore() }
+            actionRow(R.drawable.ic_delete, "Reset listening stats", "Clears play counts and history") { cb.resetStats() }
         }
 
         section("Library", R.drawable.ic_folder)
@@ -139,6 +182,7 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
             })
             head.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = 16.dp })
             addView(head, LinearLayout.LayoutParams(-1, -2))
+            actionRow(R.drawable.ic_info, "GitHub", "github.com/Yexclsv25/Lumen-Music") { cb.openRepo() }
             infoRow(R.drawable.ic_info, "Open-source credits", "AndroidX Media3, Material Components, AndroidX")
             infoRow(R.drawable.ic_music_note, "© 2026 yexclsv", NativeBridge.stringFromJNI())
         }

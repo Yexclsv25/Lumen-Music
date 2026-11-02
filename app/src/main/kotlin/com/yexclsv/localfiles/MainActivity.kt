@@ -43,7 +43,16 @@ import androidx.media3.common.Player
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import androidx.core.content.pm.PackageInfoCompat
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.progressindicator.LinearProgressIndicator
+import com.google.android.material.slider.Slider
+import com.yexclsv.localfiles.audio.AudioFx
 import com.yexclsv.localfiles.data.*
+import com.yexclsv.localfiles.update.UpdateInfo
+import com.yexclsv.localfiles.update.UpdateResult
+import com.yexclsv.localfiles.update.Updater
+import kotlinx.coroutines.CancellationException
 import com.yexclsv.localfiles.databinding.ActivityMainBinding
 import com.yexclsv.localfiles.ui.*
 import kotlinx.coroutines.Job
@@ -117,6 +126,31 @@ class MainActivity : AppCompatActivity() {
             toast("Cover updated")
         }
     }
+    private val backupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { it.write(vm.store.exportJson().toByteArray()) }
+                toast("Backup saved")
+            } catch (_: Exception) {
+                toast("Couldn't save the backup")
+            }
+        }
+    }
+    private val restoreLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = try {
+                contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            } catch (_: Exception) {
+                null
+            }
+            if (text != null && vm.store.importJson(text)) {
+                toast("Backup restored")
+                vm.scan()
+            } else toast("That file isn't a valid Lumen backup")
+        }
+    }
+    private var pendingApk: java.io.File? = null
+
     private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         vm.scan()
         updateEmpty()
@@ -175,6 +209,8 @@ class MainActivity : AppCompatActivity() {
         requestPerms()
         handleIntent(intent)
         showLastCrash()
+        showWhatsNew()
+        autoCheckUpdates()
     }
 
     private fun showLastCrash() {
@@ -212,6 +248,16 @@ class MainActivity : AppCompatActivity() {
             persist(u)
             vm.playExternal(u)
             i.data = null
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pendingApk?.let {
+            if (Updater.canInstall(this)) {
+                pendingApk = null
+                Updater.install(this, it)
+            }
         }
     }
 
@@ -361,7 +407,9 @@ class MainActivity : AppCompatActivity() {
         chip("Shuffle", R.drawable.ic_shuffle) { vm.shuffleAll(trackAdapter.currentList.map { it.track }) }.tag = "shuffle"
         chip("All") { vm.listState.update { it.copy(filter = LibraryFilter.ALL) } }.tag = LibraryFilter.ALL
         chip("Favorites") { vm.listState.update { it.copy(filter = LibraryFilter.FAVORITES) } }.tag = LibraryFilter.FAVORITES
-        chip("Recent") { vm.listState.update { it.copy(filter = LibraryFilter.RECENT) } }.tag = LibraryFilter.RECENT
+        chip("Added") { vm.listState.update { it.copy(filter = LibraryFilter.RECENT) } }.tag = LibraryFilter.RECENT
+        chip("Top") { vm.listState.update { it.copy(filter = LibraryFilter.MOST_PLAYED) } }.tag = LibraryFilter.MOST_PLAYED
+        chip("History") { vm.listState.update { it.copy(filter = LibraryFilter.HISTORY) } }.tag = LibraryFilter.HISTORY
         chip("Sort", R.drawable.ic_sort) { showSortMenu() }.tag = "sort"
         refreshChips()
     }
@@ -462,6 +510,7 @@ class MainActivity : AppCompatActivity() {
     private fun switchPage(i: Int) {
         if (i == page) return
         closeSearch()
+        if (i == 2) settingsUi.render()
         val old = pageView(page)
         val new = pageView(i)
         val dir = if (i > page) 1 else -1
@@ -559,6 +608,10 @@ class MainActivity : AppCompatActivity() {
         items += ActionSheet.Item(if (fav) "Remove from favorites" else "Add to favorites") { vm.toggleFavorite(t.key) }
         items += ActionSheet.Item("Add to playlist…") { showPlaylistPicker(t) }
         items += ActionSheet.Item("Edit info & cover…") { showEditDialog(t) }
+        items += ActionSheet.Item("More from ${t.artist}") { searchFor(t.artist) }
+        if (t.album.isNotBlank() && t.album != "Unknown album")
+            items += ActionSheet.Item("More from this album") { searchFor(t.album) }
+        items += ActionSheet.Item("Share") { shareTrack(t) }
         if (inPlaylist != null && inPlaylist != "fav")
             items += ActionSheet.Item("Remove from this playlist", destructive = true) { vm.store.removeFromPlaylist(inPlaylist, t.key) }
         if (!t.fromMediaStore)
@@ -630,8 +683,12 @@ class MainActivity : AppCompatActivity() {
     private fun showSleepMenu() {
         val opts = listOf(0 to "Off", 5 to "5 minutes", 10 to "10 minutes", 15 to "15 minutes", 30 to "30 minutes", 45 to "45 minutes", 60 to "1 hour", 90 to "90 minutes")
         val active = vm.sleepUntil.value > 0
-        sheet.show("Sleep timer", opts.map { (m, label) ->
-            ActionSheet.Item(label, selected = m == 0 && !active) {
+        val eot = vm.sleepUntil.value == Long.MAX_VALUE
+        sheet.show("Sleep timer", listOf(ActionSheet.Item("End of this song", selected = eot) {
+            vm.setSleepEndOfTrack()
+            toast("Pausing after this song")
+        }) + opts.map { (m, label) ->
+            ActionSheet.Item(label, selected = m == 0 && !active && !eot) {
                 vm.setSleep(m)
                 if (m > 0) toast("Pausing in $label")
             }
@@ -887,6 +944,20 @@ class MainActivity : AppCompatActivity() {
             override fun addFiles() { pickFiles.launch(arrayOf("audio/*")) }
             override fun clearExtras() = vm.clearExtras()
             override fun sleepMenu() = showSleepMenu()
+            override fun version() = versionName()
+            override fun checkUpdates() = checkForUpdates(true)
+            override fun openEqualizer() = showEqualizer()
+            override fun backup() { backupLauncher.launch("Lumen-backup.json") }
+            override fun restore() { restoreLauncher.launch(arrayOf("application/json", "*/*")) }
+            override fun stats(): Pair<String, String> {
+                val p = vm.store.plays.value
+                val total = p.values.sumOf { it.count }
+                val topKey = p.maxByOrNull { it.value.count }?.key
+                val t = vm.tracks.value.firstOrNull { it.key == topKey }
+                return "$total plays" to (if (t != null) "Top song: ${t.title} (${p[t.key]?.count}x)" else "Play songs to build your stats")
+            }
+            override fun resetStats() { vm.store.resetPlays(); toast("Stats cleared"); settingsUi.render() }
+            override fun openRepo() = openUrl(Updater.REPO_URL)
         })
         settingsUi.render()
     }
@@ -989,6 +1060,263 @@ class MainActivity : AppCompatActivity() {
         }
         if (playerOpen) bindPlayer(u)
         updateTicker()
+    }
+
+    // ---------- search / share ----------
+    private fun searchFor(q: String) {
+        if (playerOpen) closePlayer(0f)
+        binding.tabBar.select(0, true)
+        switchPage(0)
+        vm.listState.update { it.copy(filter = LibraryFilter.ALL) }
+        if (!searching) openSearch()
+        binding.searchField.setText(q)
+        binding.searchField.setSelection(q.length)
+    }
+
+    private fun shareTrack(t: Track) {
+        try {
+            val i = Intent(Intent.ACTION_SEND).apply {
+                type = "audio/*"
+                putExtra(Intent.EXTRA_STREAM, t.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(i, "Share " + t.title))
+        } catch (_: Exception) {
+            toast("Can't share this file")
+        }
+    }
+
+    private fun openUrl(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            toast("No browser found")
+        }
+    }
+
+    // ---------- equalizer ----------
+    private fun showEqualizer() {
+        val info = AudioFx.info()
+        if (info == null) {
+            toast("Start playing a song first, then open the equalizer")
+            return
+        }
+        val s = vm.store.settings.value
+        val saved = s.eqLevels.split(",").mapNotNull { it.trim().toIntOrNull() }
+        val levels = MutableList(info.bands) { saved.getOrElse(it) { 0 }.coerceIn(info.minMb, info.maxMb) }
+        val col = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(24.dp, 8.dp, 24.dp, 0)
+        }
+        val enable = MaterialSwitch(this).apply {
+            text = "Enable equalizer"
+            isChecked = s.eqOn
+            setTextColor(Color.WHITE)
+        }
+        fun push() = vm.store.update { it.copy(eqOn = enable.isChecked, eqLevels = levels.joinToString(",")) }
+        enable.setOnCheckedChangeListener { _, _ -> push() }
+        col.addView(enable)
+
+        val sliders = ArrayList<Slider>()
+        val labels = ArrayList<TextView>()
+        fun db(mb: Int) = "%+.1f dB".format(mb / 100f)
+
+        if (info.presets.isNotEmpty()) {
+            val scroll = android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+            val row = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+            info.presets.forEachIndexed { i, name ->
+                row.addView(TextView(this).apply {
+                    text = name
+                    textSize = 13f
+                    setTextColor(Color.WHITE)
+                    setPadding(14.dp, 8.dp, 14.dp, 8.dp)
+                    background = GradientDrawable().apply { cornerRadius = 100f.dp; setColor(0x24FFFFFF) }
+                    setOnClickListener {
+                        AudioFx.presetLevels(i)?.let { lv ->
+                            lv.forEachIndexed { b, v ->
+                                if (b < levels.size) {
+                                    levels[b] = v.coerceIn(info.minMb, info.maxMb)
+                                    sliders[b].value = levels[b].toFloat()
+                                    labels[b].text = "${info.freqsHz[b]} Hz   ${db(levels[b])}"
+                                }
+                            }
+                            enable.isChecked = true
+                            push()
+                        }
+                    }
+                    pressBounce(0.93f)
+                }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 8.dp })
+            }
+            scroll.addView(row)
+            col.addView(scroll, android.widget.LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10.dp; bottomMargin = 6.dp })
+        }
+
+        for (b in 0 until info.bands) {
+            val label = TextView(this).apply {
+                text = "${info.freqsHz[b]} Hz   ${db(levels[b])}"
+                setTextColor(0xFFB4B4C2.toInt())
+                textSize = 13f
+                setPadding(0, 10.dp, 0, 0)
+            }
+            val sl = Slider(this).apply {
+                valueFrom = info.minMb.toFloat()
+                valueTo = info.maxMb.toFloat()
+                value = levels[b].toFloat()
+                trackActiveTintList = tintList(accent)
+                thumbTintList = tintList(accent)
+                haloTintList = tintList(accent.withAlpha(0x33))
+                trackInactiveTintList = tintList(0x26FFFFFF)
+                addOnChangeListener { _, v, fromUser ->
+                    if (fromUser) {
+                        levels[b] = v.toInt()
+                        label.text = "${info.freqsHz[b]} Hz   ${db(levels[b])}"
+                        if (!enable.isChecked) enable.isChecked = true else push()
+                    }
+                }
+            }
+            labels.add(label)
+            sliders.add(sl)
+            col.addView(label)
+            col.addView(sl)
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Equalizer")
+            .setView(android.widget.ScrollView(this).apply { addView(col) })
+            .setNeutralButton("Reset") { _, _ ->
+                vm.store.update { it.copy(eqLevels = List(info.bands) { 0 }.joinToString(",")) }
+            }
+            .setPositiveButton("Done", null)
+            .show()
+    }
+
+    // ---------- updates ----------
+    private fun versionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1"
+    } catch (_: Exception) {
+        "1.1"
+    }
+
+    private fun autoCheckUpdates() {
+        val now = System.currentTimeMillis()
+        if (vm.store.settings.value.autoUpdate && now - vm.store.getLong("lastCheck") > 12 * 3600_000L) {
+            vm.store.putLong("lastCheck", now)
+            checkForUpdates(false)
+        }
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        if (manual) toast("Checking for updates...")
+        lifecycleScope.launch {
+            when (val r = Updater.check(versionName())) {
+                is UpdateResult.Available ->
+                    if (manual || r.info.version != vm.store.getStr("skipVersion")) showUpdateDialog(r.info)
+                is UpdateResult.UpToDate -> if (manual) toast("You're on the latest version (v${versionName()})")
+                is UpdateResult.Error -> if (manual) toast("Couldn't check for updates: ${r.message}")
+            }
+        }
+    }
+
+    private fun showUpdateDialog(info: UpdateInfo) {
+        val size = if (info.sizeBytes > 0) "\n\nSize: %.1f MB".format(info.sizeBytes / 1048576.0) else ""
+        val tv = TextView(this).apply {
+            text = info.notes.trim().ifEmpty { "No release notes." }.take(1200) + size
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(24.dp, 8.dp, 24.dp, 0)
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Update available: v${info.version}")
+            .setView(android.widget.ScrollView(this).apply { addView(tv) })
+            .setPositiveButton(if (info.apkUrl != null) "Update" else "Open release") { _, _ ->
+                if (info.apkUrl != null) startDownload(info) else openUrl(info.pageUrl)
+            }
+            .setNegativeButton("Later", null)
+            .setNeutralButton("Skip this version") { _, _ -> vm.store.putStr("skipVersion", info.version) }
+            .show()
+    }
+
+    private fun startDownload(info: UpdateInfo) {
+        val bar = LinearProgressIndicator(this).apply {
+            isIndeterminate = false
+            setIndicatorColor(accent)
+        }
+        val label = TextView(this).apply {
+            text = "Downloading..."
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setPadding(0, 0, 0, 12.dp)
+        }
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(24.dp, 12.dp, 24.dp, 0)
+            addView(label)
+            addView(bar)
+        }
+        var job: Job? = null
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Updating to v${info.version}")
+            .setView(box)
+            .setCancelable(false)
+            .setNegativeButton("Cancel") { _, _ -> job?.cancel() }
+            .create()
+        dialog.show()
+        job = lifecycleScope.launch {
+            try {
+                val f = Updater.download(this@MainActivity, info) { p ->
+                    bar.setProgressCompat((p * 100).toInt(), true)
+                    label.text = "Downloading... ${(p * 100).toInt()}%"
+                }
+                dialog.dismiss()
+                installApk(f)
+            } catch (e: CancellationException) {
+                dialog.dismiss()
+                throw e
+            } catch (e: Exception) {
+                dialog.dismiss()
+                toast("Update failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun installApk(f: java.io.File) {
+        if (Updater.canInstall(this)) {
+            Updater.install(this, f)
+            return
+        }
+        pendingApk = f
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Allow installs")
+            .setMessage("Android needs your permission before Lumen can install its own updates. Turn on \"Allow from this source\", then come back.")
+            .setPositiveButton("Open settings") { _, _ -> Updater.openInstallPermissionSettings(this) }
+            .setNegativeButton("Cancel") { _, _ -> pendingApk = null }
+            .show()
+    }
+
+    private fun showWhatsNew() {
+        val code = try {
+            PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0))
+        } catch (_: Exception) {
+            return
+        }
+        val seen = vm.store.getLong("seenCode", 0L)
+        vm.store.putLong("seenCode", code)
+        if (seen in 1 until code) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("What's new in v${versionName()}")
+                .setMessage(
+                    "• Automatic updates from GitHub\n" +
+                    "• Equalizer, bass boost and loudness boost\n" +
+                    "• Skip silence\n" +
+                    "• Resume exactly where you left off\n" +
+                    "• Most played and History in your library\n" +
+                    "• Sleep timer: end of this song\n" +
+                    "• Backup and restore\n" +
+                    "• Share songs, and jump to more from an artist or album\n" +
+                    "• ALAC (Apple Lossless) playback"
+                )
+                .setPositiveButton("Nice", null)
+                .show()
+        }
     }
 
     // ---------- back ----------
