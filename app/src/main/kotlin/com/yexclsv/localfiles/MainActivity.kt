@@ -1191,9 +1191,9 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- updates ----------
     private fun versionName(): String = try {
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1"
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2"
     } catch (_: Exception) {
-        "1.1"
+        "1.2"
     }
 
     private fun autoCheckUpdates() {
@@ -1304,15 +1304,18 @@ class MainActivity : AppCompatActivity() {
             MaterialAlertDialogBuilder(this)
                 .setTitle("What's new in v${versionName()}")
                 .setMessage(
-                    "• Automatic updates from GitHub\n" +
-                    "• Equalizer, bass boost and loudness boost\n" +
-                    "• Skip silence\n" +
-                    "• Resume exactly where you left off\n" +
-                    "• Most played and History in your library\n" +
-                    "• Sleep timer: end of this song\n" +
-                    "• Backup and restore\n" +
-                    "• Share songs, and jump to more from an artist or album\n" +
-                    "• ALAC (Apple Lossless) playback"
+                    if (versionName().startsWith("1.2"))
+                        "Small polish and fixes. This update arrived through Lumen's built-in updater."
+                    else
+                        "• Automatic updates from GitHub\n" +
+                        "• Equalizer, bass boost and loudness boost\n" +
+                        "• Skip silence\n" +
+                        "• Resume exactly where you left off\n" +
+                        "• Most played and History in your library\n" +
+                        "• Sleep timer: end of this song\n" +
+                        "• Backup and restore\n" +
+                        "• Share songs, and jump to more from an artist or album\n" +
+                        "• ALAC (Apple Lossless) playback"
                 )
                 .setPositiveButton("Nice", null)
                 .show()
