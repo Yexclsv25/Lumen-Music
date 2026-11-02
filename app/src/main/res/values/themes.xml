@@ -1,0 +1,13 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <style name="Base.AppTheme" parent="Theme.Material3.Dark.NoActionBar">
+    <item name="android:windowBackground">@color/bg</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:textColorPrimary">@color/text</item>
+    <item name="colorPrimary">#FF8F7BFF</item>
+    <item name="colorSurface">@color/surface</item>
+    <item name="android:fontFamily">sans-serif</item>
+  </style>
+
+  <style name="AppTheme" parent="Base.AppTheme" />
+</resources>

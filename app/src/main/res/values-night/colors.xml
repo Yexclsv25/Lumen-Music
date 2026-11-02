@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FF09090D</color>
+    <color name="surface">#FF15151C</color>
+    <color name="surface2">#FF1E1E28</color>
+    <color name="text">#FFF4F4F8</color>
+    <color name="text2">#FF9C9CAC</color>
+    <color name="hairline">#1FFFFFFF</color>
+</resources>

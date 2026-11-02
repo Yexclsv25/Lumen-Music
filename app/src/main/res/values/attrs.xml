@@ -1,0 +1,7 @@
+<resources>
+    <declare-styleable name="GlassLayout">
+        <attr name="glass_cornerRadius" format="dimension" />
+        <attr name="glass_tint" format="color" />
+        <attr name="glass_refraction" format="boolean" />
+    </declare-styleable>
+</resources>
