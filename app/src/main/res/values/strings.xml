@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Lumen</string>
+    <string name="shortcut_shuffle">Shuffle all</string>
+    <string name="shortcut_shuffle_long">Shuffle your whole library</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_search_long">Search your music</string>
 </resources>

@@ -1,0 +1,5 @@
+<resources>
+  <style name="AppTheme" parent="Base.AppTheme">
+    <item name="android:windowSplashScreenBackground">#FF08080C</item>
+  </style>
+</resources>

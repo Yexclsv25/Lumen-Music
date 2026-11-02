@@ -42,6 +42,8 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
         fun stats(): Pair<String, String>
         fun resetStats()
         fun openRepo()
+        fun hiddenCount(): Int
+        fun unhideAll()
     }
 
     private val ctx: Context get() = container.context
@@ -141,6 +143,8 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
 
         section("Library", R.drawable.ic_folder)
         card {
+            val hid = cb.hiddenCount()
+            if (hid > 0) actionRow(R.drawable.ic_refresh, "Hidden songs", "$hid hidden. Tap to restore all") { cb.unhideAll() }
             actionRow(R.drawable.ic_delete, "Remove added files and folders", "Nothing is deleted from storage") { cb.clearExtras() }
         }
 

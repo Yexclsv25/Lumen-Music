@@ -15,6 +15,17 @@
 
 ---
 
+## What's new in 2.0
+
+- **Animated intro screen** with the logo and a loading pulse, plus a matching Android 12+ splash
+- **Browse by album and artist**, with playlists, in the new **Browse** tab
+- **Lyrics**: add a `.lrc` file or paste text. Time-stamped lyrics highlight and scroll in sync, and you can tap a line to jump to it
+- **Player gestures**: swipe the album art to change songs, double-tap it to like
+- **Queue tools**: save the queue as a playlist, or clear what's coming up
+- **Hide songs** you never want to see, and restore them from Settings
+- **Song info**: format, bitrate, sample rate, size
+- **Launcher shortcuts**: long-press the icon for *Shuffle all* and *Search*
+
 ## Features
 
 **Playback**
@@ -33,7 +44,7 @@
 
 **Library**
 - Finds music through Android's media library, and lets you add **individual files or whole folders** from anywhere on the device
-- Search, filter (All / Favorites / Added / **Top / History**), and sort (title, artist, album, date added, duration)
+- Browse by **album** and **artist**; search, filter (All / Favorites / Added / **Top / History**), and sort (title, artist, album, date added, duration)
 - **Most played** and **play history**, built from what you actually listen to *(new in 1.1)*
 - **More from this artist / album** and **Share** in every song's menu *(new in 1.1)*
 - Playlists and Favorites
@@ -110,9 +121,9 @@ Android has no built-in Apple Lossless decoder, so Lumen ships its own in `alac/
 
 The in-app updater reads the **latest GitHub release** of this repository.
 
-1. Raise `versionCode` and `versionName` in `app/build.gradle` (for example `2` / `'1.1'`)
+1. Raise `versionCode` and `versionName` in `app/build.gradle` (for example `4` / `'2.0'`)
 2. Build a **release** APK and sign it with **the same keystore every time**. Android refuses to update an app when the signing key changes
-3. On GitHub: *Releases → Draft a new release*, tag it `v1.1` (the tag must match the version, with or without the `v`), and write the release notes
+3. On GitHub: *Releases → Draft a new release*, tag it `v2.0` (the tag must match the version, with or without the `v`), and write the release notes
 4. Attach the `.apk` file as a release asset
 
 Installed copies that are older than the tag will then offer the update. The release notes you write are what users see in the update dialog.
@@ -128,9 +139,11 @@ Installed copies that are older than the tag will then offer the update. The rel
 
 - [x] Equalizer (1.1)
 - [x] In-app updates (1.1)
-- [ ] Lyrics (embedded and `.lrc`)
-- [ ] Album and artist views
-- [ ] Gapless / crossfade options
+- [x] Lyrics from `.lrc` or pasted text (2.0)
+- [ ] Lyrics embedded in audio tags
+- [x] Album and artist views (2.0)
+- [ ] Crossfade
+- [ ] Home-screen widget
 - [ ] Android Auto
 
 ## Credits

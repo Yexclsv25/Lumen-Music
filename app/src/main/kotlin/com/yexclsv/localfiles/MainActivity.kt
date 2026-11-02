@@ -11,6 +11,9 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.media.MediaMetadataRetriever
+import android.provider.OpenableColumns
 import android.transition.ChangeBounds
 import android.transition.Fade
 import android.transition.TransitionManager
@@ -55,7 +58,12 @@ import com.yexclsv.localfiles.update.Updater
 import kotlinx.coroutines.CancellationException
 import com.yexclsv.localfiles.databinding.ActivityMainBinding
 import com.yexclsv.localfiles.ui.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -150,6 +158,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private var pendingApk: java.io.File? = null
+    private lateinit var lyricsPanel: LyricsPanel
+    private var showLyrics = false
+    private var lyricsKey: String? = null
+    private var pendingShortcut: String? = null
+    private var chipsPage = -1
+    private var introStart = 0L
+    private var lyricsTargetKey: String? = null
+    private val pickLyrics = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val k = lyricsTargetKey
+        if (uri != null && k != null) {
+            val text = try {
+                contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            } catch (_: Exception) {
+                null
+            }
+            if (!text.isNullOrBlank()) {
+                vm.store.saveLyrics(k, text)
+                reloadLyricsIfCurrent(k)
+                toast("Lyrics added")
+            } else toast("Couldn't read that file")
+        }
+    }
 
     private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         vm.scan()
@@ -192,6 +222,7 @@ class MainActivity : AppCompatActivity() {
 
         _binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setupIntro(savedInstanceState == null)
 
         sheet = ActionSheet(binding.sheetHost, { accent }, { bottomInset })
 
@@ -249,6 +280,14 @@ class MainActivity : AppCompatActivity() {
             vm.playExternal(u)
             i.data = null
         }
+        when (i?.action) {
+            "com.yexclsv.localfiles.SHUFFLE" -> pendingShortcut = "shuffle"
+            "com.yexclsv.localfiles.SEARCH" -> binding.root.post {
+                if (page != 0) { binding.tabBar.select(0, false); switchPage(0) }
+                if (!searching) openSearch()
+            }
+        }
+        if (i?.action?.startsWith("com.yexclsv.localfiles.") == true) i.action = null
     }
 
     override fun onResume() {
@@ -308,7 +347,7 @@ class MainActivity : AppCompatActivity() {
         val bottom = bottomInset + 12.dp + 64.dp + 16.dp + if (hasMini) 72.dp else 0
         b.pageLibrary.list.setPadding(0, libTop, 0, bottom)
         b.pageLibrary.emptyState.setPadding(40.dp, libTop, 40.dp, bottom)
-        b.pagePlaylists.playlistGrid.setPadding(12.dp, otherTop, 12.dp, bottom)
+        b.pagePlaylists.playlistGrid.setPadding(12.dp, libTop, 12.dp, bottom)
         b.pagePlaylists.detail.setPadding(0, otherTop, 0, 0)
         b.pagePlaylists.detailList.setPadding(0, 0, 0, bottom)
         b.pageSettings.settingsScroll.setPadding(0, otherTop, 0, bottom)
@@ -415,6 +454,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshChips() {
+        if (chipsPage != 0) return
         val ls = vm.listState.value
         for (i in 0 until binding.chipRow.childCount) {
             val c = binding.chipRow.getChildAt(i) as TextView
@@ -462,13 +502,52 @@ class MainActivity : AppCompatActivity() {
         b.btnSearch.setImageResource(R.drawable.ic_search)
     }
 
+    private fun buildBrowseChips() {
+        val row = binding.chipRow
+        row.removeAllViews()
+        listOf("Playlists", "Albums", "Artists").forEachIndexed { i, label ->
+            row.addView(TextView(this).apply {
+                text = label
+                textSize = 14f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                setPadding(18.dp, 0, 18.dp, 0)
+                tag = i
+                setOnClickListener {
+                    it.tick()
+                    vm.browseMode.value = i
+                    refreshBrowseChips()
+                    updateTopBar()
+                }
+                pressBounce(0.92f)
+            }, android.widget.LinearLayout.LayoutParams(-2, 34.dp).apply { marginEnd = 8.dp })
+        }
+        refreshBrowseChips()
+    }
+
+    private fun refreshBrowseChips() {
+        for (i in 0 until binding.chipRow.childCount) {
+            val c = binding.chipRow.getChildAt(i) as TextView
+            val on = c.tag == vm.browseMode.value
+            c.setTextColor(if (on) 0xFF101014.toInt() else Color.WHITE)
+            c.background = GradientDrawable().apply {
+                cornerRadius = 100f.dp
+                setColor(if (on) accent else 0x24FFFFFF)
+            }
+        }
+    }
+
     private fun updateTopBar() {
         val b = binding
         val detail = page == 1 && vm.detailId.value != null
+        if (page <= 1 && chipsPage != page) {
+            chipsPage = page
+            if (page == 0) buildChips() else buildBrowseChips()
+        }
         b.title.text = when {
             page == 0 -> "Library"
             page == 1 && detail -> playlistRowsNow.firstOrNull { it.id == vm.detailId.value }?.name ?: "Playlist"
-            page == 1 -> "Playlists"
+            page == 1 -> when (vm.browseMode.value) { 0 -> "Playlists"; 1 -> "Albums"; else -> "Artists" }
             else -> "Settings"
         }
         if (!searching) {
@@ -480,9 +559,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         b.btnSearch.visibility = if (page == 0) View.VISIBLE else View.GONE
-        b.btnAdd.visibility = if (page == 0 || (page == 1 && !detail)) View.VISIBLE else View.GONE
+        b.btnAdd.visibility = if (page == 0 || (page == 1 && !detail && vm.browseMode.value == 0)) View.VISIBLE else View.GONE
         b.btnBack.visibility = if (detail) View.VISIBLE else View.GONE
-        if (page == 0) {
+        if (page == 0 || (page == 1 && !detail)) {
             if (b.chipScroll.visibility != View.VISIBLE) {
                 b.chipScroll.alpha = 0f
                 b.chipScroll.visibility = View.VISIBLE
@@ -503,7 +582,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTabs() {
         val t = binding.tabBar
-        t.setTabs(listOf(R.drawable.ic_music_note to "Library", R.drawable.ic_queue_music to "Playlists", R.drawable.ic_settings to "Settings"))
+        t.setTabs(listOf(R.drawable.ic_music_note to "Library", R.drawable.ic_queue_music to "Browse", R.drawable.ic_settings to "Settings"))
         t.onSelected = { switchPage(it) }
     }
 
@@ -551,7 +630,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPlaylistMenu(r: PlaylistRow) {
-        if (r.isFav) return
+        if (r.isFav || r.id.contains(':')) return
         sheet.show(r.name, listOf(
             ActionSheet.Item("Rename") { promptName("Rename playlist", r.name) { vm.store.renamePlaylist(r.id, it) } },
             ActionSheet.Item("Delete", destructive = true) { vm.store.deletePlaylist(r.id) }
@@ -612,7 +691,12 @@ class MainActivity : AppCompatActivity() {
         if (t.album.isNotBlank() && t.album != "Unknown album")
             items += ActionSheet.Item("More from this album") { searchFor(t.album) }
         items += ActionSheet.Item("Share") { shareTrack(t) }
-        if (inPlaylist != null && inPlaylist != "fav")
+        items += ActionSheet.Item("Song info") { showSongInfo(t) }
+        items += ActionSheet.Item("Hide from library", destructive = true) {
+            vm.store.hide(t.key)
+            toast("Hidden. You can restore it in Settings")
+        }
+        if (inPlaylist != null && inPlaylist != "fav" && !inPlaylist.contains(':'))
             items += ActionSheet.Item("Remove from this playlist", destructive = true) { vm.store.removeFromPlaylist(inPlaylist, t.key) }
         if (!t.fromMediaStore)
             items += ActionSheet.Item("Remove from library", destructive = true) { vm.removeExtra(t.key) }
@@ -652,6 +736,20 @@ class MainActivity : AppCompatActivity() {
             .create()
         col.addView(button("Choose cover image").apply {
             setOnClickListener { coverTargetKey = t.key; pickCover.launch(arrayOf("image/*")) }
+        }, gap)
+        col.addView(button("Add lyrics from file (.lrc / .txt)").apply {
+            setOnClickListener { lyricsTargetKey = t.key; pickLyrics.launch(arrayOf("*/*")) }
+        }, gap)
+        col.addView(button("Paste lyrics").apply {
+            setOnClickListener { dialog.dismiss(); promptLyrics(t) }
+        }, gap)
+        if (vm.store.readLyrics(t.key) != null) col.addView(button("Remove lyrics").apply {
+            setOnClickListener {
+                vm.store.deleteLyrics(t.key)
+                reloadLyricsIfCurrent(t.key)
+                toast("Lyrics removed")
+                dialog.dismiss()
+            }
         }, gap)
         if (t.coverPath != null) col.addView(button("Remove custom cover").apply {
             setOnClickListener { vm.removeCover(t.key); toast("Cover removed"); dialog.dismiss() }
@@ -705,11 +803,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun showQueue() {
         val q = vm.upNext()
-        if (q.isEmpty()) {
-            toast("Nothing queued after this song")
+        val items = ArrayList<ActionSheet.Item>()
+        items += ActionSheet.Item("Save queue as playlist…") { saveQueueAsPlaylist() }
+        if (q.isNotEmpty()) items += ActionSheet.Item("Clear upcoming songs", destructive = true) { vm.clearUpcoming() }
+        q.forEach { (i, t) -> items += ActionSheet.Item("${t.title} — ${t.artist}") { vm.jumpTo(i) } }
+        sheet.show("Up next", items, sheetBackdrop())
+    }
+
+    private fun saveQueueAsPlaylist() {
+        val tracks = vm.queueTracks()
+        if (tracks.isEmpty()) {
+            toast("The queue is empty")
             return
         }
-        sheet.show("Up next", q.map { (i, t) -> ActionSheet.Item("${t.title} — ${t.artist}") { vm.jumpTo(i) } }, sheetBackdrop())
+        promptName("Save queue as playlist", "My queue") { name ->
+            val p = vm.store.createPlaylist(name)
+            vm.store.addAllToPlaylist(p.id, tracks.map { it.key })
+            toast("Saved ${tracks.size} songs to ${p.name}")
+        }
     }
 
     private fun speedLabel(s: Float) = if (s == s.toInt().toFloat()) "${s.toInt()}x" else "${s}x"
@@ -786,6 +897,30 @@ class MainActivity : AppCompatActivity() {
             it.spring(DynamicAnimation.SCALE_Y, 1f, 500f, 0.35f)
         }
 
+        lyricsPanel = LyricsPanel(p.lyricsScroll, p.lyricsContainer) { ms -> vm.seekTo(ms) }
+        p.btnLyrics.pressBounce(0.86f)
+        p.btnLyrics.setOnClickListener { it.tick(); toggleLyrics() }
+
+        val artGestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                likeWithBurst()
+                return true
+            }
+
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                if (abs(vx) > abs(vy) && abs(vx) > 900) {
+                    val dir = if (vx < 0) -1 else 1
+                    p.playerArt.tick()
+                    if (dir < 0) vm.next() else vm.previous()
+                    p.playerArt.translationX = dir * 70.dp.toFloat()
+                    p.playerArt.spring(DynamicAnimation.TRANSLATION_X, 0f, 380f, 0.7f)
+                }
+                return true
+            }
+        })
+        p.playerArt.setOnTouchListener { _, e -> artGestures.onTouchEvent(e) }
+
         p.seek.listener = object : LiquidSeekBar.Listener {
             override fun onStart() { seeking = true }
             override fun onChange(fraction: Float) {
@@ -842,6 +977,7 @@ class MainActivity : AppCompatActivity() {
         p.btnSpeed.setTextColor(if (abs(u.speed - 1f) < 0.01f) 0x99FFFFFF.toInt() else playerAccent)
         p.btnSleep.imageTintList = tintList(if (vm.sleepUntil.value > 0) playerAccent else 0x99FFFFFF.toInt())
         p.btnQueue.imageTintList = tintList(0x99FFFFFF.toInt())
+        p.btnLyrics.imageTintList = tintList(if (showLyrics) playerAccent else 0x99FFFFFF.toInt())
         p.btnPrev.imageTintList = tintList(Color.WHITE)
         p.btnNext.imageTintList = tintList(Color.WHITE)
         val s = if (u.isPlaying) 1f else 0.86f
@@ -863,6 +999,7 @@ class MainActivity : AppCompatActivity() {
         p.btnPlay.backgroundTintList = tintList(playerAccent)
         p.playerArtist.setTextColor(playerAccent)
         binding.miniProgress.backgroundTintList = tintList(playerAccent)
+        lyricsPanel.setAccent(playerAccent)
         bindPlayer(lastUi)
     }
 
@@ -889,6 +1026,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun onTrackChanged(t: Track) {
         binding.miniArt.loadArt(lifecycleScope, t, 140)
+        loadLyrics(t)
         binding.player.playerArt.loadArt(lifecycleScope, t, 800)
         artJob?.cancel()
         artJob = lifecycleScope.launch {
@@ -925,6 +1063,7 @@ class MainActivity : AppCompatActivity() {
                 p.timeRemain.text = "-" + fmtTime(dur - pos)
             }
         }
+        if (playerOpen && showLyrics) lyricsPanel.update(pos)
         if (force || nowMs - lastMiniMs > 500) {
             lastMiniMs = nowMs
             binding.miniProgress.scaleX = pos.toFloat() / dur
@@ -958,6 +1097,8 @@ class MainActivity : AppCompatActivity() {
             }
             override fun resetStats() { vm.store.resetPlays(); toast("Stats cleared"); settingsUi.render() }
             override fun openRepo() = openUrl(Updater.REPO_URL)
+            override fun hiddenCount() = vm.store.hidden.value.size
+            override fun unhideAll() { vm.store.unhideAll(); toast("Songs restored"); settingsUi.render() }
         })
         settingsUi.render()
     }
@@ -1010,6 +1151,10 @@ class MainActivity : AppCompatActivity() {
                     vm.rows.collect { rows ->
                         libraryCount = rows.size
                         trackAdapter.submitList(rows)
+                        if (pendingShortcut == "shuffle" && rows.isNotEmpty()) {
+                            pendingShortcut = null
+                            vm.shuffleAll(rows.map { it.track })
+                        }
                         if (page == 0 && !searching) binding.countBadge.text = rows.size.toString()
                         updateEmpty()
                     }
@@ -1023,7 +1168,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 launch {
-                    vm.playlistRows.collect { rows ->
+                    vm.browseRows.collect { rows ->
                         playlistRowsNow = rows
                         playlistAdapter.submitList(rows)
                         if (page == 1) updateTopBar()
@@ -1060,6 +1205,181 @@ class MainActivity : AppCompatActivity() {
         }
         if (playerOpen) bindPlayer(u)
         updateTicker()
+    }
+
+    // ---------- intro ----------
+    private fun setupIntro(first: Boolean) {
+        val b = binding
+        if (!first) {
+            b.intro.visibility = View.GONE
+            return
+        }
+        introStart = SystemClock.elapsedRealtime()
+        b.introAurora.setColors(accent, mix(accent, 0xFF2A6CFF.toInt(), 0.5f), false)
+        b.introLogo.roundCorners(28f.dp)
+        b.introBars.color = Color.WHITE
+        b.introBars.active = true
+        b.introLogo.alpha = 0f
+        b.introLogo.scaleX = 0.6f
+        b.introLogo.scaleY = 0.6f
+        b.introLogo.animate().alpha(1f).setDuration(450).start()
+        b.introLogo.spring(DynamicAnimation.SCALE_X, 1f, 260f, 0.5f)
+        b.introLogo.spring(DynamicAnimation.SCALE_Y, 1f, 260f, 0.5f)
+        listOf<View>(b.introTitle, b.introTag, b.introBars, b.introFoot).forEachIndexed { i, v ->
+            v.alpha = 0f
+            v.translationY = 24.dp.toFloat()
+            v.animate().alpha(1f).translationY(0f).setStartDelay(250L + i * 110L).setDuration(500)
+                .setInterpolator(PathInterpolator(0.2f, 0f, 0f, 1f)).start()
+        }
+        lifecycleScope.launch {
+            withTimeoutOrNull(4000) { vm.scanning.first { !it } }
+            val wait = 1500L - (SystemClock.elapsedRealtime() - introStart)
+            if (wait > 0) delay(wait)
+            dismissIntro()
+        }
+    }
+
+    private fun dismissIntro() {
+        val v = binding.intro
+        v.animate().alpha(0f).scaleX(1.06f).scaleY(1.06f).setDuration(480)
+            .setInterpolator(PathInterpolator(0.4f, 0f, 0.2f, 1f))
+            .withEndAction { v.visibility = View.GONE }.start()
+    }
+
+    // ---------- lyrics ----------
+    private fun toggleLyrics() {
+        showLyrics = !showLyrics
+        val p = binding.player
+        if (showLyrics) {
+            p.lyricsScroll.alpha = 0f
+            p.lyricsScroll.visibility = View.VISIBLE
+            p.lyricsScroll.animate().alpha(1f).setDuration(220).start()
+            p.artHolder.animate().alpha(0f).setDuration(200).start()
+        } else {
+            p.lyricsScroll.animate().alpha(0f).setDuration(200).withEndAction {
+                if (!showLyrics) p.lyricsScroll.visibility = View.GONE
+            }.start()
+            p.artHolder.animate().alpha(1f).setDuration(220).start()
+        }
+        bindPlayer(lastUi)
+        updateProgress(System.nanoTime() / 1_000_000, true)
+    }
+
+    private fun loadLyrics(t: Track) {
+        lyricsKey = t.key
+        lifecycleScope.launch {
+            val txt = withContext(Dispatchers.IO) { vm.store.readLyrics(t.key) }
+            if (lyricsKey != t.key) return@launch
+            lyricsPanel.setLyrics(txt?.let { LyricsParser.parse(it) }, playerAccent)
+            if (playerOpen) updateProgress(System.nanoTime() / 1_000_000, true)
+        }
+    }
+
+    private fun reloadLyricsIfCurrent(key: String) {
+        val cur = lastUi.current ?: return
+        if (cur.key == key) loadLyrics(cur)
+    }
+
+    private fun promptLyrics(t: Track) {
+        val input = EditText(this).apply {
+            setText(vm.store.readLyrics(t.key).orEmpty())
+            hint = "Paste lyrics here. Lines like [01:23.45] text make them scroll in time."
+            minLines = 8
+            maxLines = 14
+            gravity = android.view.Gravity.TOP
+            textSize = 14f
+        }
+        val box = FrameLayout(this).apply {
+            setPadding(24.dp, 8.dp, 24.dp, 0)
+            addView(input)
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Lyrics for ${t.title}")
+            .setView(android.widget.ScrollView(this).apply { addView(box) })
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val text = input.text.toString()
+                if (text.isBlank()) vm.store.deleteLyrics(t.key) else vm.store.saveLyrics(t.key, text)
+                reloadLyricsIfCurrent(t.key)
+                toast("Lyrics saved")
+            }
+            .show()
+    }
+
+    private fun likeWithBurst() {
+        val t = lastUi.current ?: return
+        val nowFav = vm.toggleFavorite(t.key)
+        val h = binding.player.heartBurst
+        h.setImageResource(if (nowFav) R.drawable.ic_heart else R.drawable.ic_heart_outline)
+        h.imageTintList = tintList(if (nowFav) playerAccent else Color.WHITE)
+        h.animate().cancel()
+        h.visibility = View.VISIBLE
+        h.alpha = 1f
+        h.scaleX = 0.3f
+        h.scaleY = 0.3f
+        h.tick()
+        h.spring(DynamicAnimation.SCALE_X, 1.15f, 420f, 0.45f)
+        h.spring(DynamicAnimation.SCALE_Y, 1.15f, 420f, 0.45f)
+        h.animate().alpha(0f).setStartDelay(450).setDuration(300).withEndAction { h.visibility = View.GONE }.start()
+    }
+
+    // ---------- song info ----------
+    private fun showSongInfo(t: Track) {
+        lifecycleScope.launch {
+            val lines = withContext(Dispatchers.IO) {
+                var mime: String? = null
+                var bitrate: String? = null
+                var rate: String? = null
+                var bits: String? = null
+                var size = -1L
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(this@MainActivity, t.uri)
+                    mime = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                    bitrate = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        rate = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
+                        bits = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    try { r.release() } catch (_: Exception) {}
+                }
+                try {
+                    contentResolver.query(t.uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) size = c.getLong(0)
+                    }
+                } catch (_: Exception) {
+                }
+                val format = when (mime) {
+                    "audio/mpeg" -> "MP3"
+                    "audio/mp4", "audio/x-m4a" -> "M4A (AAC or Apple Lossless)"
+                    "audio/flac", "audio/x-flac" -> "FLAC (lossless)"
+                    "audio/x-wav", "audio/wav" -> "WAV (lossless)"
+                    "audio/ogg", "application/ogg" -> "Ogg (Vorbis or Opus)"
+                    null -> "Unknown"
+                    else -> mime
+                }
+                val out = ArrayList<String>()
+                out += "Title: ${t.title}"
+                out += "Artist: ${t.artist}"
+                out += "Album: ${t.album}"
+                if (t.trackNo > 0) out += "Track: ${t.trackNo}"
+                out += "Duration: ${fmtTime(t.durationMs)}"
+                out += "Format: $format"
+                bitrate?.toLongOrNull()?.let { out += "Bitrate: ${it / 1000} kbps" }
+                rate?.let { out += "Sample rate: $it Hz" }
+                bits?.let { out += "Bit depth: $it-bit" }
+                if (size > 0) out += "Size: %.1f MB".format(size / 1048576.0)
+                out += "Source: " + (if (t.fromMediaStore) "Device library" else "Added file")
+                out
+            }
+            MaterialAlertDialogBuilder(this@MainActivity)
+                .setTitle("Song info")
+                .setMessage(lines.joinToString("\n"))
+                .setPositiveButton("OK", null)
+                .show()
+        }
     }
 
     // ---------- search / share ----------
@@ -1191,9 +1511,9 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- updates ----------
     private fun versionName(): String = try {
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2"
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "2.0"
     } catch (_: Exception) {
-        "1.2"
+        "2.0"
     }
 
     private fun autoCheckUpdates() {
@@ -1304,7 +1624,16 @@ class MainActivity : AppCompatActivity() {
             MaterialAlertDialogBuilder(this)
                 .setTitle("What's new in v${versionName()}")
                 .setMessage(
-                    if (versionName().startsWith("1.2"))
+                    if (versionName().startsWith("2."))
+                        "• New animated intro screen\n" +
+                        "• Browse by album and artist\n" +
+                        "• Lyrics: add .lrc files or paste text, with synced highlighting\n" +
+                        "• Swipe the album art to change song, double-tap it to like\n" +
+                        "• Save your queue as a playlist, or clear what's coming up\n" +
+                        "• Hide songs you don't want in the library\n" +
+                        "• Song info: format, bitrate, size\n" +
+                        "• Launcher shortcuts: Shuffle all and Search"
+                    else if (versionName().startsWith("1.2"))
                         "Small polish and fixes. This update arrived through Lumen's built-in updater."
                     else
                         "• Automatic updates from GitHub\n" +

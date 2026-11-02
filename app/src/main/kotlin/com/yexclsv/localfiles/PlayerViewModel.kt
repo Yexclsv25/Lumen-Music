@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -49,12 +50,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val listState = MutableStateFlow(ListState())
     val detailId = MutableStateFlow<String?>(null)
     val sleepUntil = MutableStateFlow(0L)
+    val browseMode = MutableStateFlow(0) // 0 playlists, 1 albums, 2 artists
 
     val errors = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
     private val index = HashMap<String, Track>()
     private var raw: List<Track> = emptyList()
     private var restored = false
+    private var pending: (() -> Unit)? = null
     private var playJob: Job? = null
     private var trackedKey: String? = null
     private val artBytes = HashMap<String, ByteArray>()
@@ -69,10 +72,25 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     val detailRows: Flow<List<TrackRow>> =
         combine(tracks, store.playlists, store.favorites, ui, detailId) { t, pls, favs, u, id ->
-            if (id == null) emptyList<TrackRow>() else {
-                val byKey = t.associateBy { it.key }
-                val keys = if (id == "fav") favs.toList() else pls.firstOrNull { it.id == id }?.keys.orEmpty()
-                keys.mapNotNull { byKey[it] }.map { row(it, favs, u) }
+            when {
+                id == null -> emptyList<TrackRow>()
+                id.startsWith("album:") -> {
+                    val n = id.removePrefix("album:")
+                    t.filter { it.album == n }
+                        .sortedWith(compareBy({ if (it.trackNo > 0) it.trackNo else Int.MAX_VALUE }, { it.title.lowercase() }))
+                        .map { row(it, favs, u) }
+                }
+                id.startsWith("artist:") -> {
+                    val n = id.removePrefix("artist:")
+                    t.filter { it.artist == n }
+                        .sortedWith(compareBy({ it.album.lowercase() }, { if (it.trackNo > 0) it.trackNo else Int.MAX_VALUE }, { it.title.lowercase() }))
+                        .map { row(it, favs, u) }
+                }
+                else -> {
+                    val byKey = t.associateBy { it.key }
+                    val keys = if (id == "fav") favs.toList() else pls.firstOrNull { it.id == id }?.keys.orEmpty()
+                    keys.mapNotNull { byKey[it] }.map { row(it, favs, u) }
+                }
             }
         }.flowOn(Dispatchers.Default)
 
@@ -88,6 +106,22 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
             out as List<PlaylistRow>
         }.flowOn(Dispatchers.Default)
+
+    private val albumRows: Flow<List<PlaylistRow>> = tracks.map { t ->
+        t.filter { it.album.isNotBlank() }.groupBy { it.album }
+            .map { (name, ts) -> PlaylistRow("album:$name", name, ts.size, ts.first(), false) }
+            .sortedBy { it.name.lowercase() }
+    }.flowOn(Dispatchers.Default)
+
+    private val artistRows: Flow<List<PlaylistRow>> = tracks.map { t ->
+        t.groupBy { it.artist }
+            .map { (name, ts) -> PlaylistRow("artist:$name", name, ts.size, ts.first(), false) }
+            .sortedBy { it.name.lowercase() }
+    }.flowOn(Dispatchers.Default)
+
+    /** What the Browse tab shows, depending on the selected mode. */
+    val browseRows: Flow<List<PlaylistRow>> =
+        combine(browseMode, playlistRows, albumRows, artistRows) { m, p, a, r -> if (m == 0) p else if (m == 1) a else r }
 
     private fun row(t: Track, favs: Set<String>, u: PlayerUi): TrackRow {
         val cur = t.key == u.current?.key
@@ -127,6 +161,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     init {
         connect()
         viewModelScope.launch { store.edits.collect { rebuild() } }
+        viewModelScope.launch { store.hidden.collect { rebuild() } }
         scan()
     }
 
@@ -166,6 +201,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 })
                 sync()
+                pending?.let { it(); pending = null }
                 tryRestore()
             } catch (_: Exception) {
             }
@@ -275,7 +311,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun rebuild() {
         val ed = store.edits.value
-        val list = raw.map { t ->
+        val hide = store.hidden.value
+        val list = raw.filter { it.key !in hide }.map { t ->
             val e = ed[t.key] ?: return@map t
             t.copy(
                 title = e.title ?: t.title,
@@ -369,7 +406,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- transport ----------------
     fun play(list: List<Track>, start: Int) {
-        val c = controller ?: return
+        val c = controller ?: run { pending = { play(list, start) }; return }
         if (list.isEmpty()) return
         c.setMediaItems(list.map(::toItem), start.coerceIn(0, list.lastIndex), 0L)
         c.prepare()
@@ -378,7 +415,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun shuffleAll(list: List<Track>) {
         if (list.isEmpty()) return
-        controller?.shuffleModeEnabled = true
+        val c = controller ?: run { pending = { shuffleAll(list) }; return }
+        c.shuffleModeEnabled = true
         play(list, Random.nextInt(list.size))
     }
 
@@ -437,6 +475,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             i++
         }
         return out
+    }
+
+    /** Every track currently in the queue. */
+    fun queueTracks(): List<Track> {
+        val c = controller ?: return emptyList()
+        return (0 until c.mediaItemCount).map { i ->
+            val mi = c.getMediaItemAt(i)
+            index[mi.mediaId] ?: fromItem(mi)
+        }
+    }
+
+    fun clearUpcoming() {
+        val c = controller ?: return
+        val from = c.currentMediaItemIndex + 1
+        if (from < c.mediaItemCount) c.removeMediaItems(from, c.mediaItemCount)
     }
 
     fun jumpTo(queueIndex: Int) {

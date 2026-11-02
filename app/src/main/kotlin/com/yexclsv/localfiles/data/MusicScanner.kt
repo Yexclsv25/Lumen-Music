@@ -42,7 +42,7 @@ object MusicScanner {
 
     private fun queryMediaStore(ctx: Context, minSeconds: Int): List<Track> {
         val list = ArrayList<Track>()
-        val proj = arrayOf(AM._ID, AM.TITLE, AM.ARTIST, AM.ALBUM, AM.ALBUM_ID, AM.DURATION, AM.DATE_ADDED)
+        val proj = arrayOf(AM._ID, AM.TITLE, AM.ARTIST, AM.ALBUM, AM.ALBUM_ID, AM.DURATION, AM.DATE_ADDED, AM.TRACK)
         val sel = "${AM.IS_MUSIC} != 0 AND ${AM.DURATION} >= ${minSeconds * 1000L}"
         ctx.contentResolver.query(AM.EXTERNAL_CONTENT_URI, proj, sel, null, null)?.use { c ->
             val iId = c.getColumnIndexOrThrow(AM._ID)
@@ -52,6 +52,7 @@ object MusicScanner {
             val iAlbumId = c.getColumnIndexOrThrow(AM.ALBUM_ID)
             val iDur = c.getColumnIndexOrThrow(AM.DURATION)
             val iAdded = c.getColumnIndexOrThrow(AM.DATE_ADDED)
+            val iTrack = c.getColumnIndexOrThrow(AM.TRACK)
             while (c.moveToNext()) {
                 val id = c.getLong(iId)
                 list.add(
@@ -63,7 +64,8 @@ object MusicScanner {
                         durationMs = c.getLong(iDur),
                         albumId = c.getLong(iAlbumId),
                         dateAdded = c.getLong(iAdded),
-                        fromMediaStore = true
+                        fromMediaStore = true,
+                        trackNo = c.getInt(iTrack) % 1000
                     )
                 )
             }
@@ -101,7 +103,9 @@ object MusicScanner {
                 durationMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
                 albumId = -1L,
                 dateAdded = System.currentTimeMillis() / 1000,
-                fromMediaStore = false
+                fromMediaStore = false,
+                trackNo = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                    ?.substringBefore('/')?.trim()?.toIntOrNull() ?: 0
             )
         } catch (e: Exception) {
             null

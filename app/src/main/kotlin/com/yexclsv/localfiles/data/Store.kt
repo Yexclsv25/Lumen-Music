@@ -24,6 +24,8 @@ class Store private constructor(ctx: Context) {
     val settings = MutableStateFlow(readSettings())
     val edits = MutableStateFlow(readEdits())
     val plays = MutableStateFlow(readPlays())
+    val hidden = MutableStateFlow<Set<String>>(readList("hidden").toSet())
+    private val lyricsDir = java.io.File(ctx.filesDir, "lyrics")
 
     // ---------- favorites ----------
     fun toggleFavorite(key: String): Boolean {
@@ -48,6 +50,9 @@ class Store private constructor(ctx: Context) {
 
     fun addToPlaylist(id: String, key: String) =
         savePlaylists(playlists.value.map { if (it.id == id && key !in it.keys) it.copy(keys = it.keys + key) else it })
+
+    fun addAllToPlaylist(id: String, keys: List<String>) =
+        savePlaylists(playlists.value.map { if (it.id == id) it.copy(keys = (it.keys + keys).distinct()) else it })
 
     fun removeFromPlaylist(id: String, key: String) =
         savePlaylists(playlists.value.map { if (it.id == id) it.copy(keys = it.keys - key) else it })
@@ -114,6 +119,36 @@ class Store private constructor(ctx: Context) {
         } catch (e: Exception) {
             emptyMap()
         }
+    }
+
+    // ---------- hidden songs ----------
+    fun hide(key: String) {
+        val n = hidden.value + key
+        hidden.value = n
+        writeList("hidden", n)
+    }
+
+    fun unhideAll() {
+        hidden.value = emptySet()
+        writeList("hidden", emptyList())
+    }
+
+    // ---------- lyrics (stored inside the app) ----------
+    private fun lyricsFile(key: String) = java.io.File(lyricsDir, "${key.hashCode().toUInt()}.txt")
+
+    fun saveLyrics(key: String, text: String) {
+        lyricsDir.mkdirs()
+        lyricsFile(key).writeText(text.take(300_000))
+    }
+
+    fun readLyrics(key: String): String? = try {
+        lyricsFile(key).takeIf { it.exists() }?.readText()
+    } catch (e: Exception) {
+        null
+    }
+
+    fun deleteLyrics(key: String) {
+        lyricsFile(key).delete()
     }
 
     // ---------- play stats ----------

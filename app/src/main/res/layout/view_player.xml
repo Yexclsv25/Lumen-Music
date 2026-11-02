@@ -81,11 +81,16 @@
                 android:src="@drawable/ic_more" />
         </FrameLayout>
 
+        <FrameLayout
+            android:id="@+id/artFrame"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
         <com.yexclsv.localfiles.ui.SquareFitLayout
             android:id="@+id/artHolder"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_height="match_parent"
             android:paddingStart="30dp"
             android:paddingTop="14dp"
             android:paddingEnd="30dp"
@@ -99,6 +104,35 @@
                 android:elevation="20dp"
                 android:scaleType="centerCrop" />
         </com.yexclsv.localfiles.ui.SquareFitLayout>
+
+            <ImageView
+                android:id="@+id/heartBurst"
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:elevation="30dp"
+                android:src="@drawable/ic_heart"
+                android:visibility="gone"
+                app:tint="#FFFFFFFF" />
+
+            <ScrollView
+                android:id="@+id/lyricsScroll"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:overScrollMode="never"
+                android:paddingStart="30dp"
+                android:paddingEnd="30dp"
+                android:scrollbars="none"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:id="@+id/lyricsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </ScrollView>
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -135,6 +169,14 @@
                     android:textColor="@color/text2"
                     android:textSize="17sp" />
             </LinearLayout>
+
+            <ImageView
+                android:id="@+id/btnLyrics"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Lyrics"
+                android:padding="12dp"
+                android:src="@drawable/ic_notes" />
 
             <ImageView
                 android:id="@+id/btnFav"

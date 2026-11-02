@@ -274,4 +274,70 @@
         android:elevation="40dp"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- Intro / loading screen -->
+    <FrameLayout
+        android:id="@+id/intro"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/bg"
+        android:clickable="true"
+        android:elevation="60dp"
+        android:focusable="true">
+
+        <com.yexclsv.localfiles.ui.AuroraView
+            android:id="@+id/introAurora"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <ImageView
+                android:id="@+id/introLogo"
+                android:layout_width="116dp"
+                android:layout_height="116dp"
+                android:contentDescription="@null"
+                android:src="@drawable/logo" />
+
+            <TextView
+                android:id="@+id/introTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="22dp"
+                android:text="Lumen"
+                android:textColor="@color/text"
+                android:textSize="34sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/introTag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Your music. Your files."
+                android:textColor="@color/text2"
+                android:textSize="14sp" />
+
+            <com.yexclsv.localfiles.ui.EqView
+                android:id="@+id/introBars"
+                android:layout_width="30dp"
+                android:layout_height="26dp"
+                android:layout_marginTop="34dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/introFoot"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="44dp"
+            android:text="made by yexclsv"
+            android:textColor="@color/text2"
+            android:textSize="12sp" />
+    </FrameLayout>
 </FrameLayout>

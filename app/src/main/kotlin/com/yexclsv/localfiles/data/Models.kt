@@ -11,7 +11,8 @@ data class Track(
     val albumId: Long,
     val dateAdded: Long,
     val fromMediaStore: Boolean,
-    val coverPath: String? = null
+    val coverPath: String? = null,
+    val trackNo: Int = 0
 ) {
     val key: String get() = uri.toString()
 }
@@ -78,3 +79,7 @@ data class TrackEdit(
 ) {
     val isEmpty get() = title == null && artist == null && album == null && cover == null
 }
+
+data class LyricLine(val timeMs: Long, val text: String)
+
+data class Lyrics(val lines: List<LyricLine>, val synced: Boolean)

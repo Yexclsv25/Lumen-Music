@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0
+
+**New**
+- Animated intro / loading screen, and a matching splash background on Android 12+
+- Browse tab with Playlists, Albums and Artists
+- Lyrics: add a `.lrc` file or paste text; synced lines highlight and scroll, tap a line to seek
+- Swipe the album art to change song, double-tap to like
+- Queue: save as playlist, clear upcoming songs
+- Hide songs from the library, restore them in Settings
+- Song info dialog (format, bitrate, sample rate, size)
+- Launcher shortcuts: Shuffle all, Search
+
+**Improved**
+- Album tracks are ordered by track number
+- Library "Shuffle all" and shortcuts wait for the player to be ready
+
 ## 1.2
 
 - Small polish and fixes
