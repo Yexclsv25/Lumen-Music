@@ -18,6 +18,7 @@ import com.google.android.material.slider.Slider
 import com.yexclsv.localfiles.NativeBridge
 import com.yexclsv.localfiles.R
 import com.yexclsv.localfiles.data.Settings
+import com.yexclsv.localfiles.discord.DiscordPresence
 import java.util.Date
 
 /** Settings page, built in code: hero card, quick actions, then grouped cards with icon rows. */
@@ -43,6 +44,8 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
         fun resetStats()
         fun openRepo()
         fun hiddenCount(): Int
+        fun discordStatus(): String
+        fun connectDiscord()
         fun unhideAll()
     }
 
@@ -121,6 +124,18 @@ class SettingsUi(private val container: LinearLayout, private val cb: Callbacks)
                 listOf("Off" to 0, "30 s" to 30, "60 s" to 60), s.minSeconds) { v ->
                 cb.update { it.copy(minSeconds = v) }
                 cb.rescan()
+            }
+        }
+
+        section("Discord", R.drawable.ic_music_note)
+        card {
+            if (!DiscordPresence.supported) {
+                infoRow(R.drawable.ic_info, "Discord Rich Presence", "Add the Discord Social SDK .aar to app/libs and rebuild (see the README)")
+            } else {
+                switchRow(R.drawable.ic_music_note, "Show what I'm playing", "Updates your Discord profile within a second", s.discordOn, true) { v ->
+                    cb.update { it.copy(discordOn = v) }
+                }
+                actionRow(R.drawable.ic_refresh, "Connect Discord account", cb.discordStatus()) { cb.connectDiscord() }
             }
         }
 

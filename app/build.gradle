@@ -4,6 +4,12 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
+// Discord Social SDK: drop its .aar into app/libs to turn Rich Presence on.
+// Without it the app builds with a harmless stub.
+def discordAars = fileTree(dir: 'libs', include: ['*.aar'])
+def hasDiscord = !discordAars.isEmpty()
+def discordAppId = (project.findProperty('discordAppId') ?: '0').toString()
+
 android {
     namespace 'com.yexclsv.localfiles'
     compileSdk 36
@@ -12,12 +18,19 @@ android {
         applicationId 'com.yexclsv.localfiles'
         minSdk 27
         targetSdk 34
-        versionCode 4
-        versionName '2.0'
+        versionCode 5
+        versionName '2.1'
+        manifestPlaceholders = [discordAppId: discordAppId]
     }
 
     buildFeatures {
         viewBinding true
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += [hasDiscord ? 'src/discord/kotlin' : 'src/nodiscord/kotlin']
+        }
     }
 
     compileOptions {
@@ -46,4 +59,5 @@ dependencies {
     implementation libs.androidx.palette
     implementation libs.androidx.media3.exoplayer
     implementation libs.androidx.media3.session
+    if (hasDiscord) implementation discordAars
 }

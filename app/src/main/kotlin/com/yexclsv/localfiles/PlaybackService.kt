@@ -3,6 +3,9 @@ package com.yexclsv.localfiles
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -19,6 +22,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.yexclsv.localfiles.alac.AlacRenderersFactory
 import com.yexclsv.localfiles.audio.AudioFx
+import com.yexclsv.localfiles.discord.DiscordPresence
 import com.yexclsv.localfiles.data.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +39,9 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var store: Store
+    private val handler = Handler(Looper.getMainLooper())
+    private var lastPresence = 0L
+    private val presenceRun = Runnable { pushPresence() }
 
     companion object {
         const val CMD_FAV = "lumen.fav"
@@ -96,7 +103,10 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         player.addListener(object : Player.Listener {
-            override fun onEvents(player: Player, events: Player.Events) = refreshButtons()
+            override fun onEvents(player: Player, events: Player.Events) {
+                refreshButtons()
+                schedulePresence()
+            }
             override fun onAudioSessionIdChanged(audioSessionId: Int) = AudioFx.attach(audioSessionId)
         })
         AudioFx.attach(player.audioSessionId)
@@ -104,10 +114,37 @@ class PlaybackService : MediaSessionService() {
             store.settings.collect {
                 AudioFx.apply(it)
                 player.setSkipSilenceEnabled(it.skipSilence)
+                schedulePresence()
             }
         }
         scope.launch { store.favorites.collect { refreshButtons() } }
         refreshButtons()
+    }
+
+    /** Sends the current song to Discord at most once per second, but immediately after a quiet period. */
+    private fun schedulePresence() {
+        if (!DiscordPresence.supported) return
+        handler.removeCallbacks(presenceRun)
+        val wait = (1000L - (SystemClock.elapsedRealtime() - lastPresence)).coerceAtLeast(0L)
+        handler.postDelayed(presenceRun, wait)
+    }
+
+    private fun pushPresence() {
+        lastPresence = SystemClock.elapsedRealtime()
+        val p = session?.player ?: return
+        if (!store.settings.value.discordOn || p.mediaItemCount == 0 || p.currentMediaItem == null) {
+            DiscordPresence.clear()
+            return
+        }
+        val md = p.mediaMetadata
+        DiscordPresence.update(
+            md.title?.toString() ?: "Unknown title",
+            md.artist?.toString() ?: "Unknown artist",
+            md.albumTitle?.toString() ?: "",
+            p.currentPosition,
+            if (p.duration == C.TIME_UNSET) 0L else p.duration,
+            p.isPlaying
+        )
     }
 
     private fun refreshButtons() {
@@ -139,6 +176,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         scope.cancel()
+        handler.removeCallbacksAndMessages(null)
+        DiscordPresence.clear()
         AudioFx.release()
         session?.run {
             player.release()

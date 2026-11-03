@@ -120,9 +120,11 @@
                 android:id="@+id/lyricsScroll"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
+                android:fadingEdgeLength="56dp"
                 android:overScrollMode="never"
                 android:paddingStart="30dp"
                 android:paddingEnd="30dp"
+                android:requiresFadingEdge="vertical"
                 android:scrollbars="none"
                 android:visibility="gone">
 

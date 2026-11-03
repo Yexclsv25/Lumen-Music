@@ -34,6 +34,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Discord login redirect (Social SDK) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="discord-${discordAppId}" />
+            </intent-filter>
             <!-- "Open with" for audio files from any file manager -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -44,6 +51,10 @@
                 <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
+
+        <meta-data
+            android:name="discord_app_id"
+            android:value="id-${discordAppId}" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

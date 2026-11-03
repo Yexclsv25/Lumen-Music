@@ -67,7 +67,8 @@ data class Settings(
     val bassBoost: Int = 0,
     val loudness: Int = 0,
     val eqOn: Boolean = false,
-    val eqLevels: String = ""
+    val eqLevels: String = "",
+    val discordOn: Boolean = false
 )
 
 /** Non-destructive edits stored in the app; the audio file itself is never touched. */

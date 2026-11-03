@@ -15,6 +15,13 @@
 
 ---
 
+## What's new in 2.1
+
+- **Discord Rich Presence**: your Discord profile shows what you're listening to, with a live progress bar. Updates reach Discord within about a second of a song change, pause or seek (see [Discord setup](#discord-rich-presence-setup))
+- Fixed settings content showing above the top bar and over the status bar while scrolling
+- Fixed lyrics lines appearing twice when a `.lrc` line carries start/end time tags
+- Lyrics now fade softly at the top and bottom
+
 ## What's new in 2.0
 
 - **Animated intro screen** with the logo and a loading pulse, plus a matching Android 12+ splash
@@ -81,6 +88,8 @@
 | `INTERNET` | Only to ask GitHub for the latest release and download updates |
 | `REQUEST_INSTALL_PACKAGES` | Lets Lumen hand a downloaded update to the installer |
 
+If you enable Discord Rich Presence, the song title, artist and playback time are sent to Discord to show on your profile. It is off by default.
+
 Lumen sends no analytics and uploads nothing. The only network request is the update check, which you can turn off in **Settings → Updates**.
 
 ## Build
@@ -117,13 +126,26 @@ app/src/main/
 
 Android has no built-in Apple Lossless decoder, so Lumen ships its own in `alac/AlacDecoderCore.java`, wired into ExoPlayer as an extra audio renderer. It handles mono and stereo, 16/20/24/32-bit, and was checked sample-for-sample against FFmpeg's output on real files.
 
+## Discord Rich Presence setup
+
+Rich Presence uses the official **Discord Social SDK**, which can't be bundled with Lumen, so you add it yourself once:
+
+1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications) and copy its **Application ID**
+2. Enable the **Social SDK** for the application and add the redirect URI `discord-<YOUR_APPLICATION_ID>:/authorize/callback` (follow Discord's *Getting started with the Social SDK on Android* guide)
+3. In *Rich Presence → Art Assets*, upload your logo with the key **`lumen`**
+4. Download the **Android SDK** from the Social SDK page and put its `.aar` file in `app/libs/`
+5. Open `gradle.properties` and set `discordAppId=<YOUR_APPLICATION_ID>`
+6. Rebuild. In the app go to **Settings → Discord**, switch on *Show what I'm playing*, then tap *Connect Discord account* and approve in the browser
+
+Without the `.aar` the project builds normally and the Discord section just says the SDK isn't installed. If the SDK version you downloaded names something differently, only `app/src/discord/kotlin/.../DiscordPresence.kt` needs adjusting.
+
 ## Releasing an update
 
 The in-app updater reads the **latest GitHub release** of this repository.
 
-1. Raise `versionCode` and `versionName` in `app/build.gradle` (for example `4` / `'2.0'`)
+1. Raise `versionCode` and `versionName` in `app/build.gradle` (for example `5` / `'2.1'`)
 2. Build a **release** APK and sign it with **the same keystore every time**. Android refuses to update an app when the signing key changes
-3. On GitHub: *Releases → Draft a new release*, tag it `v2.0` (the tag must match the version, with or without the `v`), and write the release notes
+3. On GitHub: *Releases → Draft a new release*, tag it `v2.1` (the tag must match the version, with or without the `v`), and write the release notes
 4. Attach the `.apk` file as a release asset
 
 Installed copies that are older than the tag will then offer the update. The release notes you write are what users see in the update dialog.

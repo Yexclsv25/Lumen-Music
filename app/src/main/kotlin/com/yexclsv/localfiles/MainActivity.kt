@@ -52,6 +52,7 @@ import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.slider.Slider
 import com.yexclsv.localfiles.audio.AudioFx
 import com.yexclsv.localfiles.data.*
+import com.yexclsv.localfiles.discord.DiscordPresence
 import com.yexclsv.localfiles.update.UpdateInfo
 import com.yexclsv.localfiles.update.UpdateResult
 import com.yexclsv.localfiles.update.Updater
@@ -236,6 +237,7 @@ class MainActivity : AppCompatActivity() {
         setupSettings()
         setupBack()
         observe()
+        DiscordPresence.attach(this)
 
         requestPerms()
         handleIntent(intent)
@@ -270,11 +272,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        DiscordPresence.onNewIntent(intent)
         handleIntent(intent)
     }
 
     private fun handleIntent(i: Intent?) {
-        if (i?.action == Intent.ACTION_VIEW && i.data != null) {
+        if (i?.action == Intent.ACTION_VIEW && i.data != null && i.scheme?.startsWith("discord-") != true) {
             val u = i.data!!
             persist(u)
             vm.playExternal(u)
@@ -333,6 +336,8 @@ class MainActivity : AppCompatActivity() {
         (b.topBar.layoutParams as FrameLayout.LayoutParams).topMargin = topInset + 12.dp
         (b.tabBar.layoutParams as FrameLayout.LayoutParams).bottomMargin = bottomInset + 12.dp
         (b.miniPlayer.layoutParams as FrameLayout.LayoutParams).bottomMargin = bottomInset + 12.dp + 64.dp + 8.dp
+        (b.pages.layoutParams as FrameLayout.LayoutParams).topMargin = topInset
+        b.pages.requestLayout()
         b.topBar.requestLayout()
         b.tabBar.requestLayout()
         b.miniPlayer.requestLayout()
@@ -342,8 +347,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyPagePadding() {
         val b = binding
-        val libTop = topInset + 12.dp + barHeight(true) + 10.dp
-        val otherTop = topInset + 12.dp + barHeight(false) + 10.dp
+        val libTop = 12.dp + barHeight(true) + 10.dp
+        val otherTop = 12.dp + barHeight(false) + 10.dp
         val bottom = bottomInset + 12.dp + 64.dp + 16.dp + if (hasMini) 72.dp else 0
         b.pageLibrary.list.setPadding(0, libTop, 0, bottom)
         b.pageLibrary.emptyState.setPadding(40.dp, libTop, 40.dp, bottom)
@@ -1098,6 +1103,15 @@ class MainActivity : AppCompatActivity() {
             override fun resetStats() { vm.store.resetPlays(); toast("Stats cleared"); settingsUi.render() }
             override fun openRepo() = openUrl(Updater.REPO_URL)
             override fun hiddenCount() = vm.store.hidden.value.size
+            override fun discordStatus() = DiscordPresence.status
+            override fun connectDiscord() {
+                DiscordPresence.connect(this@MainActivity) { st ->
+                    runOnUiThread {
+                        toast(st)
+                        settingsUi.render()
+                    }
+                }
+            }
             override fun unhideAll() { vm.store.unhideAll(); toast("Songs restored"); settingsUi.render() }
         })
         settingsUi.render()
@@ -1511,9 +1525,9 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- updates ----------
     private fun versionName(): String = try {
-        packageManager.getPackageInfo(packageName, 0).versionName ?: "2.0"
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "2.1"
     } catch (_: Exception) {
-        "2.0"
+        "2.1"
     }
 
     private fun autoCheckUpdates() {
@@ -1624,7 +1638,12 @@ class MainActivity : AppCompatActivity() {
             MaterialAlertDialogBuilder(this)
                 .setTitle("What's new in v${versionName()}")
                 .setMessage(
-                    if (versionName().startsWith("2."))
+                    if (versionName().startsWith("2.1"))
+                        "• Discord Rich Presence: show what you're playing (needs the Discord SDK, see README)\n" +
+                        "• Fixed settings content showing above the top bar\n" +
+                        "• Fixed duplicated lyrics lines\n" +
+                        "• Lyrics fade softly at the edges"
+                    else if (versionName().startsWith("2."))
                         "• New animated intro screen\n" +
                         "• Browse by album and artist\n" +
                         "• Lyrics: add .lrc files or paste text, with synced highlighting\n" +

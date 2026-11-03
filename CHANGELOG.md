@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1
+
+- Discord Rich Presence through the Discord Social SDK (optional, off by default); fast updates on song change, pause and seek
+- Fixed settings content scrolling above the top bar and into the status bar
+- Fixed duplicated lyrics lines (start/end time tags and repeated entries)
+- Lyrics fade at the edges
+
 ## 2.0
 
 **New**

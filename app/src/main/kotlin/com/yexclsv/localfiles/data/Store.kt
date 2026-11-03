@@ -326,6 +326,7 @@ class Store private constructor(ctx: Context) {
             .putInt("loud", s.loudness)
             .putBoolean("eqOn", s.eqOn)
             .putString("eqLevels", s.eqLevels)
+            .putBoolean("discordOn", s.discordOn)
             .apply()
     }
 
@@ -346,7 +347,8 @@ class Store private constructor(ctx: Context) {
             bassBoost = sp.getInt("bass", d.bassBoost),
             loudness = sp.getInt("loud", d.loudness),
             eqOn = sp.getBoolean("eqOn", d.eqOn),
-            eqLevels = sp.getString("eqLevels", d.eqLevels) ?: ""
+            eqLevels = sp.getString("eqLevels", d.eqLevels) ?: "",
+            discordOn = sp.getBoolean("discordOn", d.discordOn)
         )
     }
 
